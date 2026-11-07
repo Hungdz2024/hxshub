@@ -16,7 +16,8 @@ e:/rbl_script/
 │   └── floating_bubble.lua   # Bong bóng nổi (Drag/Tap delta > 5px) và bảng Menu chính
 ├── modules/
 │   ├── night_vision.lua      # Snapshot và can thiệp Lighting (Fullbright)
-│   └── arrow_esp.lua         # Scanner Loop (0.4s), Object Pooling (15 ImageLabels), atan2 math
+│   ├── arrow_esp.lua         # Scanner Loop (0.4s), Object Pooling (15 ImageLabels), atan2 math
+│   └── auto_left_click.lua   # Trigger Bot: Raycast tâm ngắm -> gửi Left Click gần như tức thời
 └── dist/
     └── bundle.lua            # Single-file standalone ném lên GitHub raw chạy loadstring()
 ```
@@ -42,6 +43,27 @@ e:/rbl_script/
    - Tính góc phương vị la bàn qua hàm `math.atan2(relativePos.Z, relativePos.X)`.
    - Định vị mũi tên trên đường tròn bán kính 90px quanh tâm ngắm (`math.cos`, `math.sin`).
    - Distance Lerp: Màu đỏ (mục tiêu ở sát mặt) chuyển dần sang xanh lá (mục tiêu ở xa).
+
+---
+
+## 🖱️ Auto Left Click (Trigger Bot)
+
+- Bật toggle trong menu, sau đó chỉ cần đưa **tâm ngắm (crosshair)** trúng Player khác.
+- Mỗi frame module bắn Raycast từ tâm màn hình; nếu trúng nhân vật còn sống của Player khác thì tự gửi **Left Click**.
+- Không bắn xuyên tường: tia ngắm trúng vật cản trước sẽ không click.
+- Chu kỳ click mặc định `0.01s` (chỉnh tại `State.Settings.AutoClick` trong `core/state.lua`):
+  - `Range = 1000` — tầm xa tối đa của tia ngắm (studs).
+  - `ClickInterval = 0.01` — thời gian giữa 2 lần click (giây).
+- Ưu tiên hàm executor (`mouse1click` / `mouse1press` + `mouse1release`), fallback `VirtualInputManager` cho Delta Mobile.
+
+---
+
+## ⌨️ Điều khiển bàn phím (PC)
+
+- `TAB`: Bật / tắt menu script.
+- `W` / `S` (hoặc `↑` / `↓`): Di chuyển lựa chọn giữa các module (dòng đang chọn được viền xanh sáng).
+- `ENTER`: Bật / tắt module đang chọn — không cần dùng chuột.
+- Tự động bỏ qua phím khi đang gõ chat / textbox.
 
 ---
 

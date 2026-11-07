@@ -19,6 +19,7 @@ local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
@@ -75,6 +76,7 @@ local State = {
     Flags = {
         NightVision = false,
         ArrowESP = false,
+        AutoLeftClick = false,
         MenuOpen = false,
     },
     Settings = {
@@ -85,6 +87,10 @@ local State = {
             Radius = 90,
             MinColor = Color3.fromRGB(255, 45, 45),   -- Gần (Đỏ)
             MaxColor = Color3.fromRGB(50, 255, 120),  -- Xa (Xanh lá)
+        },
+        AutoClick = {
+            Range = 1000,          -- Tầm bắn tối đa của tia ngắm (studs)
+            ClickInterval = 0.01,  -- Chu kỳ gửi click (10ms -> gần như tức thời)
         },
         UI = {
             DragThreshold = 5,
@@ -206,6 +212,9 @@ local function updateTargetCache()
         return
     end
 
+    local myPos = myRoot.Position
+    local rawList = {}
+
     -- Helper tìm RootPart của Mob linh hoạt (HumanoidRootPart, PrimaryPart, Torso, UpperTorso)
     local function getMobRoot(model)
         return model:FindFirstChild("HumanoidRootPart")
@@ -323,6 +332,136 @@ end)
 globalMaid:GiveTask(espRenderConn)
 
 -- =============================================================================
+-- [MODULE 4] AUTO LEFT CLICK (TRIGGER BOT THEO TÂM NGẮM)
+-- =============================================================================
+local autoClickConfig = State.Settings.AutoClick
+local autoClickConn = nil
+local autoClickCooldown = 0
+
+local autoClickRaycastParams = RaycastParams.new()
+autoClickRaycastParams.IgnoreWater = true
+
+local function sendLeftClick()
+    if type(mouse1click) == "function" then
+        pcall(mouse1click)
+        return
+    end
+
+    if type(mouse1press) == "function" and type(mouse1release) == "function" then
+        pcall(mouse1press)
+        pcall(mouse1release)
+        return
+    end
+
+    local camera = Workspace.CurrentCamera
+    if camera and VirtualInputManager then
+        local center = camera.ViewportSize * 0.5
+        pcall(function()
+            VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 1)
+            VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 1)
+        end)
+    end
+end
+
+local function getPlayerUnderCrosshair(range, ignoreList)
+    local camera = Workspace.CurrentCamera
+    if not camera then
+        return nil
+    end
+
+    local viewport = camera.ViewportSize
+    local ray = camera:ViewportPointToRay(viewport.X * 0.5, viewport.Y * 0.5)
+
+    autoClickRaycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    autoClickRaycastParams.FilterDescendantsInstances = ignoreList
+
+    local result = Workspace:Raycast(ray.Origin, ray.Direction * range, autoClickRaycastParams)
+    if not result then
+        return nil
+    end
+
+    local ancestor = result.Instance
+    while ancestor and ancestor ~= Workspace do
+        local player = Players:GetPlayerFromCharacter(ancestor)
+        if player then
+            if player == LocalPlayer then
+                return nil
+            end
+
+            local character = player.Character
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health <= 0 then
+                return nil
+            end
+
+            return player
+        end
+
+        ancestor = ancestor.Parent
+    end
+
+    return nil
+end
+
+local function autoClickRenderStep(deltaTime)
+    if autoClickCooldown > 0 then
+        autoClickCooldown = math.max(autoClickCooldown - deltaTime, 0)
+    end
+
+    if not State.Flags.AutoLeftClick then
+        return
+    end
+
+    -- Không click khi menu đang mở (tránh bấm nhầm UI) hoặc đang gõ chat
+    if State.Flags.MenuOpen or UserInputService:GetFocusedTextBox() then
+        return
+    end
+
+    if autoClickCooldown > 0 then
+        return
+    end
+
+    local character = LocalPlayer.Character
+    if not character or not character.Parent then
+        return
+    end
+
+    local ignoreList = { character }
+    local camera = Workspace.CurrentCamera
+    if camera then
+        table.insert(ignoreList, camera)
+    end
+
+    local target = getPlayerUnderCrosshair(autoClickConfig.Range, ignoreList)
+    if target then
+        sendLeftClick()
+        autoClickCooldown = autoClickConfig.ClickInterval
+    end
+end
+
+local function setAutoLeftClick(enabled)
+    State.Flags.AutoLeftClick = enabled
+
+    if enabled then
+        autoClickCooldown = 0
+        if not autoClickConn then
+            autoClickConn = RunService.RenderStepped:Connect(autoClickRenderStep)
+            globalMaid:GiveTask(autoClickConn)
+        end
+    elseif autoClickConn then
+        autoClickConn:Disconnect()
+        autoClickConn = nil
+    end
+end
+
+globalMaid:GiveTask(function()
+    if autoClickConn then
+        autoClickConn:Disconnect()
+        autoClickConn = nil
+    end
+end)
+
+-- =============================================================================
 -- [MODULE 1] BONG BÓNG NỔI & GIAO DIỆN MENU (FLOATING BUBBLE UI)
 -- =============================================================================
 local bubble = Instance.new("TextButton")
@@ -350,7 +489,7 @@ bubbleStroke.Parent = bubble
 -- Bảng Menu Window
 local menuFrame = Instance.new("Frame")
 menuFrame.Name = "DeltaHubMenu"
-menuFrame.Size = UDim2.fromOffset(260, 215)
+menuFrame.Size = UDim2.fromOffset(260, 245)
 menuFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
 menuFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 menuFrame.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
@@ -406,6 +545,11 @@ uiLayout.Padding = UDim.new(0, 8)
 uiLayout.FillDirection = Enum.FillDirection.Vertical
 uiLayout.Parent = contentList
 
+-- Danh sách toggle phục vụ điều hướng bàn phím (TAB + W/S + Enter)
+local toggles = {}
+local selectedIndex = 1
+local updateHighlight
+
 local function createToggle(name, text, defaultVal, callback)
     local btn = Instance.new("TextButton")
     btn.Name = name
@@ -450,15 +594,41 @@ local function createToggle(name, text, defaultVal, callback)
     tagCorner.Parent = statusTag
 
     local isEnabled = defaultVal
-    btn.Activated:Connect(function()
-        isEnabled = not isEnabled
+
+    local function applyVisualState()
         statusTag.Text = isEnabled and "ON" or "OFF"
         statusTag.BackgroundColor3 = isEnabled and Color3.fromRGB(0, 180, 255) or Color3.fromRGB(40, 45, 58)
         statusTag.TextColor3 = isEnabled and Color3.fromRGB(15, 20, 30) or Color3.fromRGB(160, 165, 180)
         btn.BackgroundColor3 = isEnabled and Color3.fromRGB(25, 55, 75) or Color3.fromRGB(26, 30, 40)
-        stroke.Color = isEnabled and Color3.fromRGB(0, 190, 255) or Color3.fromRGB(45, 50, 65)
+    end
+
+    local function activate()
+        isEnabled = not isEnabled
+        applyVisualState()
         callback(isEnabled)
-    end)
+        updateHighlight()
+    end
+
+    btn.Activated:Connect(activate)
+
+    table.insert(toggles, {
+        Button = btn,
+        Label = label,
+        Stroke = stroke,
+        Activate = activate,
+        SetSelected = function(selected)
+            if selected then
+                stroke.Thickness = 2
+                stroke.Color = Color3.fromRGB(0, 235, 255)
+                label.TextColor3 = Color3.fromRGB(0, 235, 255)
+            else
+                stroke.Thickness = 1
+                stroke.Color = isEnabled and Color3.fromRGB(0, 190, 255) or Color3.fromRGB(45, 50, 65)
+                label.TextColor3 = Color3.fromRGB(230, 230, 240)
+            end
+        end
+    })
+
     return btn
 end
 
@@ -470,14 +640,35 @@ createToggle("ToggleArrowESP", "🎯 Mob Arrow ESP (Chỉ Quái)", State.Flags.A
     State.Flags.ArrowESP = val
 end)
 
+createToggle("ToggleAutoLeftClick", "🖱️ Auto Left Click (Tự Bắn)", State.Flags.AutoLeftClick, function(val)
+    setAutoLeftClick(val)
+end)
+
 local footerText = Instance.new("TextLabel")
 footerText.Size = UDim2.new(1, 0, 0, 20)
 footerText.BackgroundTransparency = 1
-footerText.Text = "Optimized for Delta Mobile • 60 FPS"
+footerText.Text = "TAB: Menu • W/S: Chọn • Enter: Bật/Tắt"
 footerText.TextColor3 = Color3.fromRGB(90, 95, 110)
 footerText.Font = Enum.Font.Gotham
 footerText.TextSize = 10
 footerText.Parent = contentList
+
+-- Tô sáng dòng đang được chọn bằng bàn phím
+updateHighlight = function()
+    for i, entry in ipairs(toggles) do
+        entry.SetSelected(i == selectedIndex)
+    end
+end
+
+-- Mở/đóng menu dùng chung cho Tap bong bóng, nút X và phím TAB
+local function setMenuOpen(open)
+    State.Flags.MenuOpen = open
+    menuFrame.Visible = open
+    if open then
+        selectedIndex = 1
+        updateHighlight()
+    end
+end
 
 -- Thuật toán phân biệt Tap vs Drag (Delta Magnitude > 5px)
 local dragging = false
@@ -511,8 +702,7 @@ local bubbleEnded = UserInputService.InputEnded:Connect(function(input)
         if dragging then
             dragging = false
             if not hasMoved then
-                State.Flags.MenuOpen = not State.Flags.MenuOpen
-                menuFrame.Visible = State.Flags.MenuOpen
+                setMenuOpen(not State.Flags.MenuOpen)
             end
         end
     end
@@ -520,8 +710,52 @@ end)
 globalMaid:GiveTask(bubbleEnded)
 
 closeBtn.Activated:Connect(function()
-    State.Flags.MenuOpen = false
-    menuFrame.Visible = false
+    setMenuOpen(false)
 end)
+
+-- =============================================================================
+-- [KEYBOARD NAVIGATION] TAB mở/đóng, W/S chọn module, ENTER bật/tắt
+-- =============================================================================
+local keyboardConn = UserInputService.InputBegan:Connect(function(input)
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then
+        return
+    end
+
+    -- Không xử lý phím khi người chơi đang gõ chat / textbox
+    if UserInputService:GetFocusedTextBox() then
+        return
+    end
+
+    local key = input.KeyCode
+
+    if key == Enum.KeyCode.Tab then
+        setMenuOpen(not State.Flags.MenuOpen)
+        return
+    end
+
+    if not State.Flags.MenuOpen then
+        return
+    end
+
+    if key == Enum.KeyCode.W or key == Enum.KeyCode.Up then
+        selectedIndex = selectedIndex - 1
+        if selectedIndex < 1 then
+            selectedIndex = #toggles
+        end
+        updateHighlight()
+    elseif key == Enum.KeyCode.S or key == Enum.KeyCode.Down then
+        selectedIndex = selectedIndex + 1
+        if selectedIndex > #toggles then
+            selectedIndex = 1
+        end
+        updateHighlight()
+    elseif key == Enum.KeyCode.Return or key == Enum.KeyCode.KeypadEnter then
+        local entry = toggles[selectedIndex]
+        if entry then
+            entry.Activate()
+        end
+    end
+end)
+globalMaid:GiveTask(keyboardConn)
 
 print("[Delta Project]: Bundled single-file script nạp thành công trên thiết bị!")

@@ -10,7 +10,7 @@ local TweenService = game:GetService("TweenService")
 
 local FloatingBubble = {}
 
-function FloatingBubble.Init(State, Maid, ScreenGui, onToggleNightVision, onToggleArrowESP)
+function FloatingBubble.Init(State, Maid, ScreenGui, onToggleNightVision, onToggleArrowESP, onToggleAutoLeftClick)
     -- =========================================================================
     -- 1. BONG BÓNG NỔI (FLOATING BUBBLE)
     -- =========================================================================
@@ -42,7 +42,7 @@ function FloatingBubble.Init(State, Maid, ScreenGui, onToggleNightVision, onTogg
     -- =========================================================================
     local menuFrame = Instance.new("Frame")
     menuFrame.Name = "MainHubFrame"
-    menuFrame.Size = UDim2.fromOffset(260, 230)
+    menuFrame.Size = UDim2.fromOffset(260, 245)
     menuFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
     menuFrame.AnchorPoint = Vector2.new(0.5, 0.5)
     menuFrame.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
@@ -107,6 +107,11 @@ function FloatingBubble.Init(State, Maid, ScreenGui, onToggleNightVision, onTogg
     uiLayout.SortOrder = Enum.SortOrder.LayoutOrder
     uiLayout.Parent = contentList
 
+    -- Danh sách toggle phục vụ điều hướng bàn phím (TAB + W/S + Enter)
+    local toggles = {}
+    local selectedIndex = 1
+    local updateHighlight
+
     -- Hàm helper tạo Button Toggle chuẩn phong cách mobile
     local function createToggle(name, text, defaultVal, callback)
         local btn = Instance.new("TextButton")
@@ -152,21 +157,45 @@ function FloatingBubble.Init(State, Maid, ScreenGui, onToggleNightVision, onTogg
         tagCorner.Parent = statusTag
 
         local isEnabled = defaultVal
-        btn.Activated:Connect(function()
-            isEnabled = not isEnabled
+
+        local function applyVisualState()
             statusTag.Text = isEnabled and "ON" or "OFF"
             statusTag.BackgroundColor3 = isEnabled and Color3.fromRGB(0, 180, 255) or Color3.fromRGB(40, 45, 58)
             statusTag.TextColor3 = isEnabled and Color3.fromRGB(15, 20, 30) or Color3.fromRGB(160, 165, 180)
             btn.BackgroundColor3 = isEnabled and Color3.fromRGB(25, 55, 75) or Color3.fromRGB(26, 30, 40)
-            stroke.Color = isEnabled and Color3.fromRGB(0, 190, 255) or Color3.fromRGB(45, 50, 65)
+        end
 
+        local function activate()
+            isEnabled = not isEnabled
+            applyVisualState()
             callback(isEnabled)
-        end)
+            updateHighlight()
+        end
+
+        btn.Activated:Connect(activate)
+
+        table.insert(toggles, {
+            Button = btn,
+            Label = label,
+            Stroke = stroke,
+            Activate = activate,
+            SetSelected = function(selected)
+                if selected then
+                    stroke.Thickness = 2
+                    stroke.Color = Color3.fromRGB(0, 235, 255)
+                    label.TextColor3 = Color3.fromRGB(0, 235, 255)
+                else
+                    stroke.Thickness = 1
+                    stroke.Color = isEnabled and Color3.fromRGB(0, 190, 255) or Color3.fromRGB(45, 50, 65)
+                    label.TextColor3 = Color3.fromRGB(230, 230, 240)
+                end
+            end
+        })
 
         return btn
     end
 
-    -- Khởi tạo 2 toggle theo tài liệu
+    -- Khởi tạo các toggle module
     createToggle("ToggleNightVision", "🌙 Night Vision (Fullbright)", State.Flags.NightVision, function(val)
         onToggleNightVision(val)
     end)
@@ -175,15 +204,36 @@ function FloatingBubble.Init(State, Maid, ScreenGui, onToggleNightVision, onTogg
         onToggleArrowESP(val)
     end)
 
+    createToggle("ToggleAutoLeftClick", "🖱️ Auto Left Click (Tự Bắn)", State.Flags.AutoLeftClick, function(val)
+        onToggleAutoLeftClick(val)
+    end)
+
     -- Status footer text
     local footerText = Instance.new("TextLabel")
     footerText.Size = UDim2.new(1, 0, 0, 20)
     footerText.BackgroundTransparency = 1
-    footerText.Text = "Optimized for Delta / Mobile 60 FPS"
+    footerText.Text = "TAB: Menu • W/S: Chọn • Enter: Bật/Tắt"
     footerText.TextColor3 = Color3.fromRGB(90, 95, 110)
     footerText.Font = Enum.Font.Gotham
     footerText.TextSize = 10
     footerText.Parent = contentList
+
+    -- Tô sáng dòng đang được chọn bằng bàn phím
+    updateHighlight = function()
+        for i, entry in ipairs(toggles) do
+            entry.SetSelected(i == selectedIndex)
+        end
+    end
+
+    -- Mở/đóng menu dùng chung cho Tap bong bóng, nút X và phím TAB
+    local function setMenuOpen(open)
+        State.Flags.MenuOpen = open
+        menuFrame.Visible = open
+        if open then
+            selectedIndex = 1
+            updateHighlight()
+        end
+    end
 
     -- =========================================================================
     -- 3. THUẬT TOÁN PHÂN BIỆT TAP & DRAG (DELTA THRESHOLD > 5 PIXELS)
@@ -225,8 +275,7 @@ function FloatingBubble.Init(State, Maid, ScreenGui, onToggleNightVision, onTogg
                 dragging = false
                 -- Nếu không vượt quá threshold -> Coi là cú chạm nhẹ (Tap) -> Đảo trạng thái mở/đóng Menu
                 if not hasMoved then
-                    State.Flags.MenuOpen = not State.Flags.MenuOpen
-                    menuFrame.Visible = State.Flags.MenuOpen
+                    setMenuOpen(not State.Flags.MenuOpen)
                 end
             end
         end
@@ -235,9 +284,53 @@ function FloatingBubble.Init(State, Maid, ScreenGui, onToggleNightVision, onTogg
 
     -- Nút đóng góc phải Menu
     closeBtn.Activated:Connect(function()
-        State.Flags.MenuOpen = false
-        menuFrame.Visible = false
+        setMenuOpen(false)
     end)
+
+    -- =========================================================================
+    -- 4. ĐIỀU HƯỚNG BÀN PHÍM: TAB mở/đóng, W/S chọn module, ENTER bật/tắt
+    -- =========================================================================
+    local keyboardConn = UserInputService.InputBegan:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.Keyboard then
+            return
+        end
+
+        -- Không xử lý phím khi người chơi đang gõ chat / textbox
+        if UserInputService:GetFocusedTextBox() then
+            return
+        end
+
+        local key = input.KeyCode
+
+        if key == Enum.KeyCode.Tab then
+            setMenuOpen(not State.Flags.MenuOpen)
+            return
+        end
+
+        if not State.Flags.MenuOpen then
+            return
+        end
+
+        if key == Enum.KeyCode.W or key == Enum.KeyCode.Up then
+            selectedIndex = selectedIndex - 1
+            if selectedIndex < 1 then
+                selectedIndex = #toggles
+            end
+            updateHighlight()
+        elseif key == Enum.KeyCode.S or key == Enum.KeyCode.Down then
+            selectedIndex = selectedIndex + 1
+            if selectedIndex > #toggles then
+                selectedIndex = 1
+            end
+            updateHighlight()
+        elseif key == Enum.KeyCode.Return or key == Enum.KeyCode.KeypadEnter then
+            local entry = toggles[selectedIndex]
+            if entry then
+                entry.Activate()
+            end
+        end
+    end)
+    Maid:GiveTask(keyboardConn)
 
     return FloatingBubble
 end

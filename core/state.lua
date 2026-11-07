@@ -8,6 +8,7 @@ local State = {
     Flags = {
         NightVision = false,
         ArrowESP = false,
+        AutoLeftClick = false,
         MenuOpen = false,
     },
 
@@ -20,6 +21,10 @@ local State = {
             Radius = 90,           -- Bán kính hiển thị mũi tên quanh tâm ngắm (pixels)
             MinColor = Color3.fromRGB(255, 45, 45),   -- Màu khi mục tiêu ở gần (nguy hiểm)
             MaxColor = Color3.fromRGB(50, 255, 120),  -- Màu khi mục tiêu ở xa (an toàn)
+        },
+        AutoClick = {
+            Range = 1000,          -- Tầm bắn tối đa của tia ngắm (studs)
+            ClickInterval = 0.01,  -- Chu kỳ gửi click (10ms -> gần như tức thời)
         },
         UI = {
             BubbleRadius = 24, -- Bán kính bong bóng (Size 48x48)

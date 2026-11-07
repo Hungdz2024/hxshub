@@ -25,6 +25,7 @@ local State = loadfile and loadfile("core/state.lua")() or require(script.core.s
 local FloatingBubble = loadfile and loadfile("ui/floating_bubble.lua")() or require(script.ui.floating_bubble)
 local NightVision = loadfile and loadfile("modules/night_vision.lua")() or require(script.modules.night_vision)
 local ArrowESP = loadfile and loadfile("modules/arrow_esp.lua")() or require(script.modules.arrow_esp)
+local AutoLeftClick = loadfile and loadfile("modules/auto_left_click.lua")() or require(script.modules.auto_left_click)
 
 -- Khởi tạo Maid toàn cục
 local Maid = MaidClass.new()
@@ -50,6 +51,7 @@ Maid:GiveTask(ScreenGui)
 -- Khởi tạo các Module hệ thống
 local nightVisionModule = NightVision.Init(State, Maid)
 local arrowESPModule = ArrowESP.Init(State, Maid, ScreenGui)
+local autoLeftClickModule = AutoLeftClick.Init(State, Maid)
 
 -- Khởi tạo UI Bong bóng nổi & Menu điều khiển
 FloatingBubble.Init(
@@ -61,6 +63,9 @@ FloatingBubble.Init(
     end,
     function(enabled)
         State.Flags.ArrowESP = enabled
+    end,
+    function(enabled)
+        autoLeftClickModule.SetEnabled(enabled)
     end
 )
 
